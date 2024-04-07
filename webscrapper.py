@@ -2,6 +2,7 @@ from bs4 import BeautifulSoup
 import requests
 import pandas as pd
 import re
+import csv
 
 
 URL  = "https://www2.hm.com/en_us/search-results.html?q=TSHIRT"
@@ -25,26 +26,55 @@ soup = BeautifulSoup(webpage.content, "html.parser")
 
 links = soup.find_all('a', class_='link', href=lambda href: href and 'productpage' in href)
 
-
+result = []
 ###############Individual product pages############
-link = links[0].get('href')
-product_list = "https://www2.hm.com" + link
-new_webpage = requests.get(product_list, headers=HEADERS)
-new_soup = BeautifulSoup(new_webpage.content, "html.parser")
-img_tag = new_soup.find('img', attrs={'srcset': True})
-# Extract the srcset attribute value
-srcset_value = img_tag.get('srcset')
+for i in range(len(links)):
+    try:
+        link = links[i].get('href')
+        product_list = "https://www2.hm.com" + link
+        new_webpage = requests.get(product_list, headers=HEADERS)
+        new_soup = BeautifulSoup(new_webpage.content, "html.parser")
+        img_tag = new_soup.find('img', attrs={'srcset': True})
+        # Extract the srcset attribute value
+        srcset_value = img_tag.get('srcset')
 
-# Define the pattern to search for
-pattern = r'(url\[file:/product/main\]).*'
+        # Define the pattern to search for
+        pattern = r'(url\[file:/product/main\]).*'
 
-# Use re.sub() to perform the replacement
-modified_string = re.sub(pattern, r'\1', srcset_value)
+        # Use re.sub() to perform the replacement
+        modified_string = re.sub(pattern, r'\1', srcset_value)
 
-# Remove repeating lines
-lines = modified_string.strip().split('\n')
-unique_lines = list(dict.fromkeys(lines))
+        # Remove repeating lines
+        lines = modified_string.strip().split('\n')
+        unique_lines = list(dict.fromkeys(lines))
 
-# Construct the product link
-product_img_link = 'https:' + unique_lines[0] 
-print(product_img_link)
+        # Construct the product link
+        product_img_link = 'https:' + unique_lines[0] 
+        print(product_img_link)
+        result.append(product_img_link)
+    except:
+        continue
+
+csv_file_path = 'image_links.csv'
+with open(csv_file_path, mode='w', newline='') as file:
+    # Create a CSV writer object
+    writer = csv.writer(file)
+    writer.writerow(["Image_link"])
+    # Append the data to the CSV file
+    for row in result:
+        writer.writerow(row)
+
+print("Data appended successfully.")    
+
+# ####Product title
+# print(link)
+# a_tag = new_soup.find('a', attrs={'href': link})
+# if a_tag:
+#     h4_tag = a_tag.find('h4')
+#     if h4_tag:
+#         product_name = h4_tag.text.strip()
+#         print(product_name)
+#     else:
+#         print("H4 tag not found within the <a> tag")
+# else:
+#     print("A tag with specified href attribute value not found")
