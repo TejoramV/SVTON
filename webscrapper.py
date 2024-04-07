@@ -57,12 +57,11 @@ for i in range(len(links)):
 
 csv_file_path = 'image_links.csv'
 with open(csv_file_path, mode='w', newline='') as file:
-    # Create a CSV writer object
     writer = csv.writer(file)
-    writer.writerow(["Image_link"])
-    # Append the data to the CSV file
-    for row in result:
-        writer.writerow(row)
+    # Write the header row
+    writer.writerow(['Image URL'])
+    # Write each image URL to a separate row
+    writer.writerows([[img] for img in result])
 
 print("Data appended successfully.")    
 
