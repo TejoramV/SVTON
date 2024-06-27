@@ -1,6 +1,7 @@
 import bpy
 import math
 import os
+import pickle
 
 def render_image(obj_file_path,output_image_path):
     # Clear existing meshes, lights, and cameras
@@ -85,8 +86,46 @@ def read_write_img(obj_folder,output_folder):
     write_mtl_file(mtl_file_path, materials)
     render_image(obj_file_path,segment_output_path)
 
-obj_folder  = "C:/Users/tejor/OneDrive/Desktop/SVTON/1937/"
-output_folder = "C:/Users/tejor/OneDrive/Desktop/SVTON/1937/"
-read_write_img(obj_folder,output_folder)
+def size_extractor(pikle_file_path):
+    with open(pikle_file_path, 'rb') as f:
+        data = pickle.load(f)
+    sizes = {}
+    for key, value in data.items():
+        parts = value.split('_')
+        if len(parts) == 4:
+            upper_body_size = parts[1]
+            lower_body_size = parts[2]
+            sizes[key] = (upper_body_size, lower_body_size)
+    return sizes
+
+def main(dataset_path,output_path,pikle_file_path):
+    sizes = size_extractor(pikle_file_path)
+    for folder in os.listdir(dataset_path):
+        folder_path = os.path.join(dataset_path, folder)
+        if os.path.isdir(folder_path):
+            for subfolder in os.listdir(folder_path):
+                try:
+                    obj_folder = os.path.join(folder_path, subfolder)
+                    output_folder = os.path.join(output_path, folder, subfolder)
+                    if not os.path.exists(output_folder):
+                        os.makedirs(output_folder)
+                    read_write_img(obj_folder,output_folder)
+                    key = folder+"/"+subfolder
+                    with open(os.path.join(output_folder,'size_labels.pkl'), 'wb') as file:
+                        pickle.dump(sizes[key], file)
+                except:
+                    continue
+
+if __name__ == "__main__":
+    dataset_path = "C:/Users/tejor/OneDrive/Desktop/SVTON/sizer_dataset/scans/dataset"
+    output_path = "C:/Users/tejor/OneDrive/Desktop/SVTON/processed_dataset"
+    pikle_file_path= 'C:/Users/tejor/OneDrive/Desktop/SVTON/sizer_dataset/scans/sizing_data.pkl'
+    main(dataset_path,output_path,pikle_file_path)
+
+
+
+
+
+
 
 
