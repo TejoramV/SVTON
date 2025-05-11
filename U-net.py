@@ -31,9 +31,21 @@ class VTONDataset(Dataset):
             self.files.append(obj_path)
         self.size_map = size_map
         self.split    = split      # decide which mask colour channel to use
-        self.T = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Resize((im_res, im_res))
+        # self.T = transforms.Compose([
+        #     transforms.Resize((im_res, im_res)),            
+        #     transforms.ToTensor()
+
+        # ])
+        # 1️⃣  Put Resize BEFORE ToTensor  (works for images too)
+        self.T_img  = transforms.Compose([
+            transforms.Resize((256, 256), interpolation=transforms.InterpolationMode.BILINEAR),
+            transforms.ToTensor()
+        ])
+
+        # 2️⃣  Separate transform for masks — use NEAREST and keep them single‑channel
+        self.T_mask = transforms.Compose([
+            transforms.Resize((256, 256), interpolation=transforms.InterpolationMode.NEAREST),
+            transforms.ToTensor()                       # returns (1, 256, 256)
         ])
 
     def __len__(self): return len(self.files)
@@ -71,9 +83,19 @@ class VTONDataset(Dataset):
         garment_np= obj_np * (mask_np[...,None])               # only garment
 
         # to tensor & resize
-        person   = self.T(person_np)
-        garment  = self.T(garment_np)
-        mask     = self.T(mask_np[None,:,:])                   # 1×H×W
+        # person   = self.T(person_np).float() 
+        # garment  = self.T(garment_np).float() 
+        # mask     = self.T(mask_np[None,:,:]).float()           # 1×H×W
+
+        # ----- inside __getitem__ ------------------------------------
+        person_img  = Image.fromarray((person_np * 255).astype(np.uint8))   # H×W×3
+        garment_img = Image.fromarray((garment_np * 255).astype(np.uint8))
+        mask_img    = Image.fromarray((mask_np * 255).astype(np.uint8))     # H×W (grayscale)
+
+        person  = self.T_img(person_img).float()      # (3, im_res, im_res)
+        garment = self.T_img(garment_img).float()
+        mask    = self.T_mask(mask_img).float()       # (1, im_res, im_res)
+
 
         size_code           = torch.zeros(len(self.size_map))
         size_code[size_lbl] = 1.
@@ -133,11 +155,17 @@ class Stage1UNet(nn.Module):
 
     def forward(self, person, garment, size_code):
         #concat (B,7,H,W)
-        x = torch.cat([
-            person,
-            garment,
-            size_code[:,None,None,:].expand(-1,1,person.size(2),person.size(3))
-        ], dim=1)
+        # x = torch.cat([
+        #     person,
+        #     garment,
+        #     size_code[:,None,None,:].expand(-1,1,person.size(2),person.size(3))
+        # ], dim=1)
+
+        B, _, H, W = person.shape
+        size_plane = size_code.argmax(1, keepdim=True).float()      # (B,1)
+        size_plane = size_plane[:, :, None, None].expand(-1, -1, H, W)
+        x = torch.cat([person, garment, size_plane], dim=1)         # (B,7,H,W)
+
         # B, S = size_code.shape          # S = 4
         # size_map = size_code.view(B, S, 1, 1).expand(-1, S, person.size(2), person.size(3))
         # x = torch.cat([person, garment, size_map], dim=1)   # (B,10,H,W)
@@ -212,10 +240,10 @@ if __name__ == "__main__":
     model = Stage1UNet(num_sizes=len(size_map)).to(device)
 
     # A) Pre-train encoder on size-classification
-    train_size_classifier(model, dl, device, epochs=10)
+    train_size_classifier(model, dl, device, epochs=20)
 
     # B) Fine-tune decoder for mask generation
-    train_mask_generator(model, dl, device, epochs=20)
+    train_mask_generator(model, dl, device, epochs=10)
 
     torch.save(model.state_dict(),
-               f"stage1_sizer_unet_{split_type}.pth")
+               f"C:/Users/Tejoram/Desktop/SVTON/output/stage1_sizer_unet_{split_type}.pth")
