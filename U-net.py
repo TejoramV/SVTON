@@ -1,3 +1,4 @@
+#train
 # stage1_sizer.py  (update only the dataset + main paths section)
 
 import os, re, glob
