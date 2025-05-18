@@ -1,14 +1,18 @@
-#train
 # stage1_sizer.py  (update only the dataset + main paths section)
 
 import os, re, glob
 import numpy as np
+import cv2
 from PIL import Image
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from tqdm import tqdm
+
+SAVE_DEBUG = False                                   # flip to False later
+DEBUG_DIR  = "C:/Users/Tejoram/Desktop/SVTON/Debug"                        
+os.makedirs(DEBUG_DIR, exist_ok=True)
 
 # ------------------------------------------------------------
 # 1. Dataset that walks sub-directories of processed_dataset_new
@@ -58,16 +62,42 @@ class VTONDataset(Dataset):
 
     def _extract_mask(self, seg_np):
         """
-        seg_np is H×W×3 RGB.  Colours in your examples:
-            blue  (0,0,255)  → upper garment
-            green (0,255,0)  → lower garment
-            red   (255,0,0)  → skin
+        Return a clean binary garment mask (float32 0/1) with:
+        • colour-threshold
+        • height gate   (keep rows y < 850)
+        • 3×3 opening   (remove 1-px specks)
+        • largest-blob  selection (keeps only the garment)
         """
-        if self.split == 'upper':   # blue channel dominates
-            mask = (seg_np[:,:,2] > 128)   # blue > 0
-        else:                       # lower → green channel
-            mask = (seg_np[:,:,1] > 128)   # green > 0
-        return mask.astype(np.float32)     # H×W binary
+        H, W, _ = seg_np.shape
+        row_mask = (np.arange(H)[:, None] < 850)          # (H,1)
+
+        # 1) raw binary
+        if self.split == 'upper':                         # pure blue ≈ red<20 & green<20
+            raw = ((seg_np[:, :, 0] < 20) &
+                (seg_np[:, :, 1] < 20) & row_mask)
+        else:                                            # lower → strong green, low R & B
+            raw = ((seg_np[:, :, 0] < 20) &
+                (seg_np[:, :, 2] < 20) &
+                (seg_np[:, :, 1] > 128) & row_mask)
+
+        # 2) morph opening (3×3) to kill tiny dots
+        raw_u8 = raw.astype(np.uint8) * 255
+        opened = cv2.morphologyEx(
+            raw_u8,
+            cv2.MORPH_OPEN,
+            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)),
+            iterations=1
+        )
+
+        # 3) keep only the largest connected component
+        num, labels, stats, _ = cv2.connectedComponentsWithStats(opened, connectivity=8)
+        if num > 1:
+            largest = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])   # 0 = background
+            cleaned = (labels == largest).astype(np.float32)
+        else:
+            cleaned = (opened > 0).astype(np.float32)
+
+        return cleaned
 
     def __getitem__(self, idx):
         obj_path = self.files[idx]
@@ -92,6 +122,15 @@ class VTONDataset(Dataset):
         person_img  = Image.fromarray((person_np * 255).astype(np.uint8))   # H×W×3
         garment_img = Image.fromarray((garment_np * 255).astype(np.uint8))
         mask_img    = Image.fromarray((mask_np * 255).astype(np.uint8))     # H×W (grayscale)
+
+        if SAVE_DEBUG:
+            # build a unique stem from the original filename
+            stem = os.path.basename(obj_path).replace("object_image_", "").rsplit(".",1)[0]
+
+            # ./debug_samples/person_00001_s_m.png  etc.
+            person_img.save (os.path.join(DEBUG_DIR, f"person_{stem}.png"))
+            garment_img.save(os.path.join(DEBUG_DIR, f"garment_{stem}.png"))
+            mask_img.save   (os.path.join(DEBUG_DIR, f"mask_{stem}.png"))        
 
         person  = self.T_img(person_img).float()      # (3, im_res, im_res)
         garment = self.T_img(garment_img).float()
@@ -241,10 +280,10 @@ if __name__ == "__main__":
     model = Stage1UNet(num_sizes=len(size_map)).to(device)
 
     # A) Pre-train encoder on size-classification
-    train_size_classifier(model, dl, device, epochs=20)
+    train_size_classifier(model, dl, device, epochs=2)
 
     # B) Fine-tune decoder for mask generation
-    train_mask_generator(model, dl, device, epochs=10)
+    train_mask_generator(model, dl, device, epochs=1)
 
     torch.save(model.state_dict(),
                f"C:/Users/Tejoram/Desktop/SVTON/output/stage1_sizer_unet_{split_type}.pth")
